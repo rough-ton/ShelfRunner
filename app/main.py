@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import uuid
 import logging
@@ -56,9 +57,9 @@ def get_config():
 BOOK_CATEGORIES = [7000, 7020, 7030, 7040]
 EBOOK_EXTENSIONS = {".epub", ".mobi", ".azw3", ".pdf", ".cbz", ".cbr"}
 
+
 def _is_ebook_result(item: dict) -> bool:
     """Return True if the result looks like an ebook based on category and/or filename."""
-    # Check Newznab categories array
     cats = item.get("categories") or []
     cat_ids = set()
     for c in cats:
@@ -78,6 +79,46 @@ def _is_ebook_result(item: dict) -> bool:
     # If no category info at all, let it through (some indexers omit categories)
     if not cat_ids:
         return True
+
+    return False
+
+
+_STOPWORDS = {"the", "a", "an", "of", "and", "in", "to", "for", "with",
+              "by", "is", "at", "on", "or", "vol", "volume", "book",
+              "edition", "complete", "series", "retail", "ebook"}
+
+
+def _normalize(text: str) -> str:
+    """Lowercase and strip punctuation."""
+    return re.sub(r"[^a-z0-9\s]", "", text.lower()).strip()
+
+
+def _is_relevant(title: str, query: str) -> bool:
+    """Return True if the title contains the query as a consecutive phrase.
+    Strips leading/trailing stopwords from the query before matching."""
+    norm_title = _normalize(title)
+    query_words = _normalize(query).split()
+
+    if not query_words:
+        return True
+
+    # Strip leading and trailing stopwords from query
+    while query_words and query_words[0] in _STOPWORDS:
+        query_words = query_words[1:]
+    while query_words and query_words[-1] in _STOPWORDS:
+        query_words = query_words[:-1]
+
+    if not query_words:
+        return True
+
+    # Primary: all query words must appear consecutively in the title
+    pattern = r"\b" + r"\s+".join(re.escape(w) for w in query_words) + r"\b"
+    if re.search(pattern, norm_title):
+        return True
+
+    # Secondary: single-word query just needs a word-boundary match
+    if len(query_words) == 1:
+        return bool(re.search(r"\b" + re.escape(query_words[0]) + r"\b", norm_title))
 
     return False
 
@@ -111,10 +152,15 @@ def search():
         log.exception("Search failed")
         return jsonify({"error": str(e)}), 500
 
-    # Filter out non-ebook results that slipped through
-    filtered = [item for item in (data or []) if _is_ebook_result(item)]
-    log.info("Search '%s': %d raw results, %d after ebook filter", query, len(data or []), len(filtered))
-    return jsonify(filtered)
+    # Filter out non-ebook results and irrelevant titles
+    raw = data or []
+    ebook_filtered = [item for item in raw if _is_ebook_result(item)]
+    relevant = [item for item in ebook_filtered if _is_relevant(item.get("title", ""), query)]
+    log.info(
+        "Search '%s': %d raw -> %d ebook -> %d relevant",
+        query, len(raw), len(ebook_filtered), len(relevant)
+    )
+    return jsonify(relevant)
 
 
 # ── Download + Send ────────────────────────────────────────────────────────────
