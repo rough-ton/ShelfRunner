@@ -8,13 +8,5 @@ services:
     env_file:
       - .env
     volumes:
-      # HOST_DOWNLOAD_DIR = the path on your HOST where your download client writes files.
-      # This gets mounted read-only to /downloads inside the container.
-      # DOWNLOAD_DIR in .env should remain /downloads (the container-internal path).
       - ${HOST_DOWNLOAD_DIR:-/mnt/downloads}:/downloads:ro
-    networks:
-      - shelfrunner-net
-
-networks:
-  shelfrunner-net:
-    driver: bridge
+    network_mode: bridge
