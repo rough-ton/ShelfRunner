@@ -92,13 +92,13 @@ def search():
     if not PROWLARR_URL or not PROWLARR_APIKEY:
         return jsonify({"error": "Prowlarr not configured (check env vars)"}), 503
 
-    params = {
-        "query":    query,
-        "type":     "book",
-        "categories": ",".join(str(c) for c in BOOK_CATEGORIES),
-        "limit":    100,
-        "apikey":   PROWLARR_APIKEY,
-    }
+    # Prowlarr expects categories as repeated params: ?categories=7000&categories=7020
+    params = [
+        ("query",  query),
+        ("type",   "book"),
+        ("limit",  100),
+        ("apikey", PROWLARR_APIKEY),
+    ] + [("categories", str(c)) for c in BOOK_CATEGORIES]
     try:
         r = requests.get(f"{PROWLARR_URL}/api/v1/search", params=params, timeout=30)
         r.raise_for_status()
