@@ -213,15 +213,17 @@ def send():
     if not SMTP_USER or not SMTP_PASS or not KINDLE_EMAIL:
         return jsonify({"error": "SMTP / Kindle email not configured"}), 503
 
-    # Push to Prowlarr download client
+    # Push to Prowlarr download client via POST /api/v1/search
+    # This is the endpoint Prowlarr uses internally when grabbing a release
     try:
         r = requests.post(
-            f"{PROWLARR_URL}/api/v1/download",
+            f"{PROWLARR_URL}/api/v1/search",
             params={"apikey": PROWLARR_APIKEY},
             json={"guid": guid, "indexerId": indexer_id},
             timeout=15,
         )
-        r.raise_for_status()
+        if r.status_code not in (200, 201, 204):
+            r.raise_for_status()
     except requests.exceptions.HTTPError as e:
         return jsonify({"error": f"Download push failed: {e.response.status_code} {e.response.text[:120]}"}), 502
     except Exception as e:
