@@ -17,4 +17,4 @@ EXPOSE 5000
 # Single worker with multiple threads: required so the in-memory _jobs dict
 # is shared between request handlers and background watcher threads.
 # Multi-worker (fork) mode would give each worker its own _jobs copy.
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "8", "--timeout", "120", "server:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "8", "--timeout", "120", "server:application"]
