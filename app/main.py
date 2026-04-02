@@ -3,7 +3,10 @@ import re
 import time
 import uuid
 import logging
+import shutil
 import smtplib
+import zipfile
+import tempfile
 import requests
 import threading
 from email import encoders
@@ -57,7 +60,7 @@ def get_config():
 # Newznab/Torznab category codes for books
 # 7000 = Books, 7020 = Books/Ebooks, 7030 = Books/Comics, 7040 = Books/Magazines
 BOOK_CATEGORIES = [7000, 7020, 7030, 7040]
-EBOOK_EXTENSIONS = {".epub", ".mobi", ".azw3", ".pdf", ".cbz", ".cbr"}
+EBOOK_EXTENSIONS = {".epub", ".mobi", ".azw3", ".pdf", ".cbz", ".cbr", ".zip"}
 
 
 # Category ID ranges that are definitely NOT ebooks -- always exclude these
@@ -303,14 +306,34 @@ def _watch_and_send(title: str, job_id: str):
     # Wait a moment to ensure file is fully written
     time.sleep(3)
 
+    extract_dir = None
     try:
-        _send_to_kindle(found_file, title)
-        _jobs[job_id] = {"id": job_id, "title": title, "status": "done", "message": f"Sent {found_file.name} to {KINDLE_EMAIL}"}
-        log.info("[%s] Delivered %s to %s", job_id, found_file.name, KINDLE_EMAIL)
+        # If it's a zip, extract the best ebook from inside it
+        if found_file.suffix.lower() == ".zip":
+            send_file = _extract_ebook_from_zip(found_file)
+            extract_dir = found_file.parent / f"_extracted_{found_file.stem}"
+        else:
+            send_file = found_file
+
+        if send_file is None:
+            raise Exception(f"No ebook found inside {found_file.name}")
+
+        _send_to_kindle(send_file, title)
+        _jobs[job_id] = {"id": job_id, "title": title, "status": "done", "message": f"Sent {send_file.name} to {KINDLE_EMAIL}"}
+        log.info("[%s] Delivered %s to %s", job_id, send_file.name, KINDLE_EMAIL)
+
+        # Clean up the temp extraction directory we created (not the original download)
+        if extract_dir and extract_dir.exists():
+            shutil.rmtree(extract_dir, ignore_errors=True)
+            log.info("[%s] Cleaned up extraction dir %s", job_id, extract_dir)
+
     except Exception as e:
         msg = f"Email failed: {e}"
         log.exception("[%s] %s", job_id, msg)
         _jobs[job_id] = {"id": job_id, "title": title, "status": "error", "message": msg}
+        # Clean up extraction dir even on failure
+        if extract_dir and extract_dir.exists():
+            shutil.rmtree(extract_dir, ignore_errors=True)
 
 
 def _ebook_snapshot(path: Path) -> set[Path]:
@@ -323,6 +346,36 @@ def _ebook_snapshot(path: Path) -> set[Path]:
     except Exception:
         pass
     return result
+
+
+def _extract_ebook_from_zip(zip_path: Path) -> Path | None:
+    """Extract the best ebook file from a zip archive into a temp directory."""
+    preferred = [".epub", ".mobi", ".azw3", ".pdf"]
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            members = zf.namelist()
+            log.info("ZIP contents: %s", members)
+            # Find best ebook by preferred extension order
+            found = None
+            for ext in preferred:
+                matches = [m for m in members if m.lower().endswith(ext)
+                           and not m.startswith("__MACOSX")]
+                if matches:
+                    found = matches[0]
+                    break
+            if not found:
+                log.warning("No ebook found in zip %s, contents: %s", zip_path.name, members)
+                return None
+            # Extract to a temp dir next to the zip
+            extract_dir = zip_path.parent / f"_extracted_{zip_path.stem}"
+            extract_dir.mkdir(exist_ok=True)
+            zf.extract(found, extract_dir)
+            extracted = extract_dir / found
+            log.info("Extracted %s from %s", extracted.name, zip_path.name)
+            return extracted
+    except Exception as e:
+        log.exception("Failed to extract zip %s: %s", zip_path.name, e)
+        return None
 
 
 def _send_to_kindle(filepath: Path, title: str):
