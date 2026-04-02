@@ -1,5 +1,6 @@
-#<img width="1024" height="1536" alt="shelfrunner-logo" src="https://github.com/user-attachments/assets/0eb3fcbb-110c-4e4b-90fd-95b38e6eaf61" />
- ShelfRunner
+#ShelfRunner
+
+<img width="1280" height="640" alt="shelfrunner-logo2" src="https://github.com/user-attachments/assets/bb80c1db-03cc-470a-a105-723448b73ee1" />
 
 **Prowlarr → Download Client → Kindle**
 
