@@ -32,7 +32,6 @@ SMTP_FROM       = os.environ.get("SMTP_FROM", SMTP_USER)
 POLL_TIMEOUT    = int(os.environ.get("POLL_TIMEOUT", "300"))   # seconds to wait for file
 POLL_INTERVAL   = int(os.environ.get("POLL_INTERVAL", "10"))   # seconds between checks
 
-EBOOK_EXTENSIONS = {".epub", ".mobi", ".azw3", ".pdf"}
 
 # ── Health ─────────────────────────────────────────────────────────────────────
 @app.route("/api/health")
@@ -52,6 +51,37 @@ def get_config():
     })
 
 
+# Newznab/Torznab category codes for books
+# 7000 = Books, 7020 = Books/Ebooks, 7030 = Books/Comics, 7040 = Books/Magazines
+BOOK_CATEGORIES = [7000, 7020, 7030, 7040]
+EBOOK_EXTENSIONS = {".epub", ".mobi", ".azw3", ".pdf", ".cbz", ".cbr"}
+
+def _is_ebook_result(item: dict) -> bool:
+    """Return True if the result looks like an ebook based on category and/or filename."""
+    # Check Newznab categories array
+    cats = item.get("categories") or []
+    cat_ids = set()
+    for c in cats:
+        if isinstance(c, dict):
+            cat_ids.add(c.get("id", 0))
+        elif isinstance(c, int):
+            cat_ids.add(c)
+    if cat_ids and cat_ids.intersection(BOOK_CATEGORIES):
+        return True
+
+    # Fallback: check file extension in title or downloadUrl
+    for field in ("title", "downloadUrl", "guid"):
+        val = (item.get(field) or "").lower()
+        if any(val.endswith(ext) or f"{ext}." in val for ext in EBOOK_EXTENSIONS):
+            return True
+
+    # If no category info at all, let it through (some indexers omit categories)
+    if not cat_ids:
+        return True
+
+    return False
+
+
 # ── Search ─────────────────────────────────────────────────────────────────────
 @app.route("/api/search")
 def search():
@@ -63,10 +93,11 @@ def search():
         return jsonify({"error": "Prowlarr not configured (check env vars)"}), 503
 
     params = {
-        "query":  query,
-        "type":   "book",
-        "limit":  100,
-        "apikey": PROWLARR_APIKEY,
+        "query":    query,
+        "type":     "book",
+        "categories": ",".join(str(c) for c in BOOK_CATEGORIES),
+        "limit":    100,
+        "apikey":   PROWLARR_APIKEY,
     }
     try:
         r = requests.get(f"{PROWLARR_URL}/api/v1/search", params=params, timeout=30)
@@ -80,7 +111,10 @@ def search():
         log.exception("Search failed")
         return jsonify({"error": str(e)}), 500
 
-    return jsonify(data)
+    # Filter out non-ebook results that slipped through
+    filtered = [item for item in (data or []) if _is_ebook_result(item)]
+    log.info("Search '%s': %d raw results, %d after ebook filter", query, len(data or []), len(filtered))
+    return jsonify(filtered)
 
 
 # ── Download + Send ────────────────────────────────────────────────────────────
