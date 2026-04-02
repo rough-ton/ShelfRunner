@@ -32,6 +32,7 @@ SMTP_PASS       = os.environ.get("SMTP_PASS", "")
 SMTP_FROM       = os.environ.get("SMTP_FROM", SMTP_USER)
 POLL_TIMEOUT    = int(os.environ.get("POLL_TIMEOUT", "300"))   # seconds to wait for file
 POLL_INTERVAL   = int(os.environ.get("POLL_INTERVAL", "10"))   # seconds between checks
+PROWLARR_CLIENT_ID = int(os.environ.get("PROWLARR_CLIENT_ID", "0"))  # 0 = Prowlarr default client
 
 
 # ── Health ─────────────────────────────────────────────────────────────────────
@@ -49,6 +50,7 @@ def get_config():
         "kindle_email":   KINDLE_EMAIL,
         "smtp_ready":     bool(SMTP_HOST and SMTP_USER and SMTP_PASS and KINDLE_EMAIL),
         "download_dir":   DOWNLOAD_DIR,
+        "prowlarr_client_id": PROWLARR_CLIENT_ID,
     })
 
 
@@ -216,10 +218,13 @@ def send():
     # Push to Prowlarr download client via POST /api/v1/search
     # This is the endpoint Prowlarr uses internally when grabbing a release
     try:
+        payload = {"guid": guid, "indexerId": indexer_id}
+        if PROWLARR_CLIENT_ID:
+            payload["downloadClientId"] = PROWLARR_CLIENT_ID
         r = requests.post(
             f"{PROWLARR_URL}/api/v1/search",
             params={"apikey": PROWLARR_APIKEY},
-            json={"guid": guid, "indexerId": indexer_id},
+            json=payload,
             timeout=15,
         )
         if r.status_code not in (200, 201, 204):
