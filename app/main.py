@@ -58,27 +58,63 @@ BOOK_CATEGORIES = [7000, 7020, 7030, 7040]
 EBOOK_EXTENSIONS = {".epub", ".mobi", ".azw3", ".pdf", ".cbz", ".cbr"}
 
 
-def _is_ebook_result(item: dict) -> bool:
-    """Return True if the result looks like an ebook based on category and/or filename."""
+# Category ID ranges that are definitely NOT ebooks -- always exclude these
+_EXCLUDED_CAT_PREFIXES = (
+    1000,  # Console games
+    2000,  # Movies
+    3000,  # Audio (music, audiobooks) -- 3030 audiobooks allowed via extension check below
+    4000,  # PC games
+    5000,  # TV
+    6000,  # XXX
+)
+_AUDIOBOOK_CATS = {3030, 3040}  # Audio/Audiobook, Audio/Lossless - allow only if extension matches
+_AUDIOBOOK_EXTENSIONS = {".m4b", ".mp3", ".mp4", ".m4a", ".ogg", ".flac", ".wav"}
+
+
+def _get_cat_ids(item: dict) -> set:
     cats = item.get("categories") or []
-    cat_ids = set()
+    ids = set()
     for c in cats:
         if isinstance(c, dict):
-            cat_ids.add(c.get("id", 0))
+            ids.add(c.get("id", 0))
         elif isinstance(c, int):
-            cat_ids.add(c)
-    if cat_ids and cat_ids.intersection(BOOK_CATEGORIES):
+            ids.add(c)
+    return ids
+
+
+def _is_ebook_result(item: dict) -> bool:
+    """Return True only if the result is a real ebook (not audio, video, games)."""
+    cat_ids = _get_cat_ids(item)
+    title = (item.get("title") or "").lower()
+    filename = (item.get("fileName") or item.get("downloadUrl") or "").lower()
+    combined = title + " " + filename
+
+    # If it has a book category (7000s), it passes
+    if any(c >= 7000 and c < 8000 for c in cat_ids):
         return True
 
-    # Fallback: check file extension in title or downloadUrl
-    for field in ("title", "downloadUrl", "guid"):
-        val = (item.get(field) or "").lower()
-        if any(val.endswith(ext) or f"{ext}." in val for ext in EBOOK_EXTENSIONS):
-            return True
+    # If it has any clearly non-book category, reject it outright
+    # unless it ALSO has an ebook file extension
+    non_book_cats = {c for c in cat_ids if any(
+        c >= prefix and c < prefix + 1000
+        for prefix in _EXCLUDED_CAT_PREFIXES
+    )}
 
-    # If no category info at all, let it through (some indexers omit categories)
+    if non_book_cats:
+        # Hard reject video/games/music categories even with ebook extensions
+        # (people encode movie names as .epub etc to trick search)
+        video_game_cats = {c for c in non_book_cats
+                           if not (c in _AUDIOBOOK_CATS)}
+        if video_game_cats:
+            return False
+
+        # Audiobook categories: only pass if it has an ebook extension in the title
+        if non_book_cats.issubset(_AUDIOBOOK_CATS):
+            return any(ext in combined for ext in EBOOK_EXTENSIONS)
+
+    # No recognised categories -- fall back to file extension check
     if not cat_ids:
-        return True
+        return any(ext in combined for ext in EBOOK_EXTENSIONS)
 
     return False
 
